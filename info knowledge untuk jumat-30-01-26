@@ -1,0 +1,202 @@
+Paham banget, Bro! Ini yang paling krusial. Biar AI selanjutnya (atau gw di sesi baru) nggak "amnesia" dan sok tau nebak-nebak codingan lu, kita butuh **"CONTEXT PROMPT"**.
+
+Ini adalah ringkasan teknis lengkap dari project lu sekarang. **Simpan teks di bawah ini**.
+
+Nanti pas lu buka chat baru sama AI, **Copy-Paste semua teks ini di chat pertama**. Dijamin dia langsung paham 100% kondisi codingan lu.
+
+---
+
+### 📂 COPY TEKS DI BAWAH INI (PROJECT CONTEXT) 📂
+
+**SYSTEM ROLE:**
+You are an expert CodeIgniter 3 Developer. I am handing over an existing project to you. Do not make assumptions about file locations or versions; use the specific context provided below.
+
+**1. PROJECT ENVIRONMENT**
+
+* **Framework:** CodeIgniter 3 (CI3).
+* **Server:** XAMPP on Linux Mint (Apache + MySQL/MariaDB).
+* **Frontend:** Bootstrap 5.3 (CDN) for all views.
+* **Base URL:** Dynamic Script (auto-detect localhost/IPv6).
+* **Session Storage:** Database Driver (`ci_sessions` table).
+
+**2. DATABASE SCHEMA (Database: `cms_db`)**
+
+```sql
+-- Table: artikel
+CREATE TABLE artikel (
+    id INT(11) AUTO_INCREMENT PRIMARY KEY,
+    judul VARCHAR(255) NOT NULL,
+    slug VARCHAR(255) NOT NULL,
+    konten TEXT NOT NULL,
+    tanggal_dibuat TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Table: user (Password uses MD5)
+CREATE TABLE user (
+    id INT(11) AUTO_INCREMENT PRIMARY KEY,
+    nama VARCHAR(100),
+    username VARCHAR(100), 
+    password VARCHAR(255) 
+);
+-- Admin data: email='admin@email.com', password=MD5('admin')
+
+-- Table: ci_sessions (Required for CI3 Session DB Driver)
+CREATE TABLE ci_sessions (
+    id varchar(128) NOT NULL,
+    ip_address varchar(45) NOT NULL,
+    timestamp int(10) unsigned DEFAULT 0 NOT NULL,
+    data blob NOT NULL,
+    KEY ci_sessions_timestamp (timestamp)
+);
+
+```
+
+**3. CRITICAL CONFIGURATION**
+
+* **`application/config/autoload.php`**:
+* `$autoload['libraries'] = array('database', 'session', 'form_validation');`
+* `$autoload['helper'] = array('url', 'file', 'text');`
+
+
+* **`application/config/config.php`** (Fixed for Redirect Loop & Session):
+* `base_url` set dynamically using `$_SERVER['HTTP_HOST']`.
+* `sess_driver` = 'database'.
+* `sess_save_path` = 'ci_sessions'.
+
+
+* **`application/config/routes.php`**:
+* Default controller is NOT set to login yet (standard CI default), but we access via `/index.php/admin` or `/index.php/login`.
+
+
+
+**4. CURRENT CODEBASE (Full Content)**
+
+**Controller: `application/controllers/Login.php**`
+
+```php
+<?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+class Login extends CI_Controller {
+    public function __construct(){
+        parent::__construct();
+        $this->load->model('Login_model');
+    }
+    public function index(){
+        if ($this->session->userdata('is_login')) { redirect('admin'); }
+        $this->load->view('login');
+    }
+    public function cek(){
+        $email = $this->input->post('email');
+        $password = $this->input->post('password');
+        if(empty($email) || empty($password)){
+            $this->session->set_flashdata('error', 'Email dan Password wajib diisi!');
+            redirect('login','refresh');
+        } else {
+            $user = $this->Login_model->login($email, $password);
+            if($user){
+                $session_data = array('id'=>$user['id'], 'nama'=>$user['nama'], 'email'=>$user['username'], 'is_login'=>TRUE);
+                $this->session->set_userdata($session_data);
+                redirect('admin');
+            } else {
+                $this->session->set_flashdata('error', 'Email atau Password salah!');
+                redirect('login','refresh');
+            }
+        }
+    }
+    public function logout() {
+        $this->session->sess_destroy();
+        redirect('login');
+    }
+}
+
+```
+
+**Controller: `application/controllers/Admin.php**`
+
+```php
+<?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+class Admin extends CI_Controller {
+    public function __construct() {
+        parent::__construct();
+        $this->load->model('Artikel_model');
+        // SECURITY CHECK
+        if(!$this->session->userdata('is_login')){ redirect('login'); }
+    }
+    public function index() {
+        $data['artikel'] = $this->Artikel_model->get_semua();
+        $this->load->view('admin/dashboard', $data);
+    }
+    public function tambah() {
+        $this->form_validation->set_rules('judul', 'Judul', 'required');
+        $this->form_validation->set_rules('konten', 'Konten', 'required');
+        if ($this->form_validation->run() === FALSE) {
+            $this->load->view('admin/tambah_artikel');
+        } else {
+            $data = ['judul' => $this->input->post('judul'), 'slug' => url_title($this->input->post('judul'), 'dash', TRUE), 'konten'=> $this->input->post('konten')];
+            $this->Artikel_model->simpan($data);
+            redirect('admin');
+        }
+    }
+    public function edit($id) {
+        $data['artikel'] = $this->Artikel_model->get_by_id($id);
+        if (empty($data['artikel'])) show_404();
+        $this->form_validation->set_rules('judul', 'Judul', 'required');
+        if ($this->form_validation->run() === FALSE) {
+            $this->load->view('admin/edit_artikel', $data);
+        } else {
+            $update_data = ['judul' => $this->input->post('judul'), 'konten'=> $this->input->post('konten')];
+            $this->Artikel_model->update($id, $update_data);
+            redirect('admin');
+        }
+    }
+    public function hapus($id) {
+        $this->Artikel_model->hapus($id);
+        redirect('admin');
+    }
+}
+
+```
+
+**Model: `application/models/Login_model.php**`
+
+```php
+<?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+class Login_model extends CI_Model {
+    public function login($email, $pass){
+        $this->db->where('username', $email);
+        $query = $this->db->get('user');
+        $user = $query->row_array(); 
+        if($user){
+            if(md5($pass) === $user['password']){ return $user; }
+        }
+        return FALSE;
+    }
+}
+
+```
+
+**Model: `application/models/Artikel_model.php**`
+
+```php
+<?php
+class Artikel_model extends CI_Model {
+    public function get_semua() { return $this->db->get('artikel')->result_array(); }
+    public function get_by_id($id) { return $this->db->get_where('artikel', ['id' => $id])->row_array(); }
+    public function simpan($data) { return $this->db->insert('artikel', $data); }
+    public function update($id, $data) { $this->db->where('id', $id); return $this->db->update('artikel', $data); }
+    public function hapus($id) { $this->db->where('id', $id); return $this->db->delete('artikel'); }
+}
+
+```
+
+**Key Views (Structure Only):**
+
+* All views (`login.php`, `admin/dashboard.php`, `admin/tambah_artikel.php`, `admin/edit_artikel.php`) have been updated to use **Bootstrap 5.3**.
+* The Dashboard and Admin Forms now include a **Top Navbar** with a dynamic "Halo, [User]" greeting and a **Logout** button pointing to `login/logout`.
+
+---
+
+**END OF CONTEXT.**
+*Please acknowledge that you understand the current project structure before proceeding with any requests.*
